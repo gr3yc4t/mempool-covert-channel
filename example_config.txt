@@ -1,0 +1,17 @@
+[ETH-config]
+destination_address = DESTINATION_ADDRESS
+private_key = YOUR_PRIV_KEY
+
+[web3]
+node_endpoint = http://localhost:8545
+infura_endpoint = https://ropsten.infura.io/v3/YOUR_API_KEY
+
+
+[client]
+network = "ropsten"
+endpoint = "infura"
+
+[server]
+network = "ropsten"
+endpoint = "node"
+commands = 'uname','ls','STOP'
