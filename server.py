@@ -12,8 +12,10 @@ def signal_handler(sig, frame):
 
     print('Exiting...')
     c2c.stop()
-    exit(0)
 
+
+
+#Config load
 
 configParser = configparser.RawConfigParser()   
 configFilePath = "config.txt"
@@ -27,8 +29,8 @@ commands_raw = configParser.get('server', 'commands')
 commands = commands_raw.replace("'", "").split(',')
 
 
-
 log.debug("Config loaded")
+
 
 
 
@@ -38,6 +40,6 @@ c2c = C2C(destination_address, private_key, commands)
 log.debug("C2C starting...")
 c2c.start(node_endpoint)
 
-
+#CTRL+C handler
 signal.signal(signal.SIGINT, signal_handler)
 

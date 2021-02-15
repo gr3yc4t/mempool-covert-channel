@@ -1,35 +1,41 @@
 from web3 import Web3
 import json
-import urllib.request
+import urllib3.request
+import urllib3.exceptions
 import coinaddr
 import time
 from bs4 import BeautifulSoup
-import web3.datastructures as wd
 import json
 import logging as log
 
 
-
+##
+#   @brief Class for fetching and parsing mempool content from Etherscan.com
+#
 class MempoolEtherscan:
 
     raw_mempool = ""
 
+    http = None
 
-    def __init__ (self, web3):
-        if not web3.isConnected():
-            log.error("Web3 is not connected!!!")
+    def __init__ (self, web3=None):
+        self.http = urllib3.PoolManager()
 
-    def __fetchMempoolHTTP(self, length=1000):
-        request = urllib.request.Request(url='https://www.etherchain.org/txs/data?draw=1&start=0&length=' + str(length), 
-                             data=None,
-                             headers={
-                                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_5) AppleWebKit/603.2.4 (KHTML, like Gecko) Version/10.1.1 Safari/603.2.4'
-                            })
-        json_txs = urllib.request.urlopen(request).read().decode('UTF-8')
 
-        txs = json.loads(json_txs)
+    ##
+    #   @brief Old and unused function
+    #
+    #def __fetchMempoolHTTP(self, length=1000):
+        #request = urllib3.request.Request(url='https://www.etherchain.org/txs/data?draw=1&start=0&length=' + str(length), 
+        #                     data=None,
+        #                     headers={
+        #                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_5) AppleWebKit/603.2.4 (KHTML, like Gecko) Version/10.1.1 Safari/603.2.4'
+        #                    })
+        #json_txs = urllib3.request.urlopen(request).read().decode('UTF-8')
 
-        self.raw_mempool = txs["data"]
+        #txs = json.loads(json_txs)
+
+        #self.raw_mempool = txs["data"]
 
     def  __parseMempoolHTTP(self):
         for tx in self.raw_mempool:
@@ -59,26 +65,40 @@ class MempoolEtherscan:
                 print("Date = " + str(eth_date))        
 
 
+    ##
+    #   @brief Fetches pending Ropsten transactions from Etherscan
+    #
+    #   @param address:str  The address to look for
+    #
+    #   @return The html raw data containing pending transaction
+    #   @return False if an error occurred
+    #
     def __fetchRopstenPendingTX(self, address: str):
         if not coinaddr.validate('eth', address):
-            return
+            return False
         etherscan_url = 'https://ropsten.etherscan.io/address/' + str(address)
 
-        request = urllib.request.Request(url=etherscan_url, 
-                             data=None,
-                             headers={
-                                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_5) AppleWebKit/603.2.4 (KHTML, like Gecko) Version/10.1.1 Safari/603.2.4'
-                            })
-        address_txs = urllib.request.urlopen(request).read().decode('UTF-8')
-        return address_txs
+        try:
+            request = self.http.request('GET', etherscan_url)
+            address_txs = request.data.decode('UTF-8')
+        except urllib3.exceptions.ReadTimeoutError as TimeoutError:
+            log.info("Timeout while fething data from Etherscan...")
+            return False
+        except urllib3.exceptions.HTTPError as HTTPError:
+            log.info("HTTP Error")
+            return False
+        else:
+            return address_txs
 
 
-
+    ##
+    #   @brief Extract pending transaction from raw Etherscan HTML
+    #
     def __getPendingTransaction(self, address_txs):
         parsed_html = BeautifulSoup(address_txs, "html.parser")
 
         result = parsed_html.find('tr', {'class': 'text-secondary'})
-        #print(result)
+
         if result is not None:
             from_addr_raw = result.find_all('a', {'class': 'hash-tag'})
             from_addr_html = BeautifulSoup(str(from_addr_raw), "html.parser")
@@ -96,25 +116,48 @@ class MempoolEtherscan:
             return [None, None]
 
     ##
+    #   @brief Extract transaction input data
+    #   
+    #   @param tx:str   The transaction where data is contained   
+    #   @return The data contained into the transaction
+    #   @return False in case of error
+    #
     #   @TODO Use 'keep-alive' header for better performance
     #
     def __getTXinputData(self, tx: str):
         etherscan_url = 'https://ropsten.etherscan.io/tx/' + str(tx)
-        request = urllib.request.Request(url=etherscan_url, 
-                             data=None,
-                             headers={
-                                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_5) AppleWebKit/603.2.4 (KHTML, like Gecko) Version/10.1.1 Safari/603.2.4'
-                            })
-        tx_data_html = urllib.request.urlopen(request).read().decode('UTF-8')
+
+        try:
+            request = self.http.request('GET', etherscan_url)
+            tx_data_html = request.data.decode('UTF-8')
+        except urllib3.exceptions.ReadTimeoutError as TimeoutError:
+            log.info("Timeout while fething data from Etherscan...")
+            return False
+        except urllib3.exceptions.HTTPError as HTTPError:
+            log.info("HTTP Error")
+            return False
 
         parsed_html = BeautifulSoup(tx_data_html, "html.parser")
-        #print(parsed_html)
-        result = parsed_html.find('textarea', {'id': 'inputdata'})
-        #print(result.string)
-        return result.string
 
+        result = parsed_html.find('textarea', {'id': 'inputdata'})
+
+        if hasattr(result, 'string'):
+            return result.string
+        else:
+            return False
+
+    ##
+    #   @brief Return data contained into the pending transaction for the given address
+    #   
+    #   @param address:str      The address to inspect
+    #   @param tentative:int    The number of failed tentative before returning error
+    #   @param delay:int        The delay between each tentative
+    #
+    #   @return The input data for that address
+    #   @return False if errors occurred
+    #
     def inspect(self, address:str, tentative:int=20, delay=1):
-        #self.__fetchMempoolHTTP()
+
         while tentative > 0:
             time.sleep(delay)
             print("Attempt " + str(tentative), end='\r')
@@ -129,7 +172,9 @@ class MempoolEtherscan:
         return False
 
 
-
+##
+#   @brief Class for fetching and parsing mempool content from Geth txpool API
+#
 class MempoolNode:
 
     w3 = None

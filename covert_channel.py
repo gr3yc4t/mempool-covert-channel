@@ -4,17 +4,19 @@ from mempool import MempoolNode
 from mempool import MempoolEtherscan
 import binascii
 import logging as log
-
+from threading import Thread, Lock
 
 class CovertChannel:
 
     lastNonce = 0
     dest_addr = None    
     node = None         #Mempool instance
-    client = False
+    client = False      #Specify if the object acts as a client or server
 
-    recv_delay = 1
+    recv_delay = 1      #Default delay between 'recv' requests
 
+    shutdown_sem_lock = Lock()
+    shutdown_sem = True #Semaphore used to stop loops
 
     def __init__(self, web3, _priv_key:str, _dest_addr:str, client:bool=False, _delay=1):
         self.w3 = web3
@@ -23,9 +25,9 @@ class CovertChannel:
         self.recv_delay = _delay
         
         if self.w3.isConnected():
-            log.info("Connected to Infura")
+            log.info("Connected to Web3")
         else:
-            log.error("Error while connecting to Infura")
+            log.error("Error while connecting to Web3")
             exit()
 
         self.my_account = self.w3.eth.account.privateKeyToAccount(self.priv_key)
@@ -37,6 +39,8 @@ class CovertChannel:
             log.warning("WARNING: Account does not have ETH")
 
 
+        # If the code runs as server, use the txpool RPC API
+        # otherwise, fetch HTML data from Etherscan
         if client is False:
             self.node = MempoolNode(self.w3)
         else:
@@ -51,15 +55,33 @@ class CovertChannel:
 
 
 
+    ##
+    #   @brief Send some data over the covert-channel
+    #
+    #   @param data:str         The data to send
+    #   @param overwrite:bool   True if is not the first message sent on the channel
+    #   @param nonceMsg:int     The sequence number of the exchanged message over the ch.
+    #
     def sendData(self, data:str, overwrite:bool=False, nonceMsg=1):
+        loop_thread = Thread(target=self.__sendData, args=(data, overwrite, nonceMsg,))
+        loop_thread.start()
 
+
+
+
+    def __sendData(self, data:str, overwrite:bool=False, nonceMsg=1):
         gasPrice = self.w3.toWei('1', 'wei')
         gas = 200000
 
-        print("DATA: " + str(data))
+        log.debug("DATA: " + str(data))
         enc_data = binascii.hexlify(data.encode('utf-8')).decode('utf-8')
 
-        while True:
+        self.shutdown_sem_lock.acquire()
+        ch_semaphore = self.shutdown_sem
+        self.shutdown_sem_lock.release()
+
+
+        while ch_semaphore:
 
             if overwrite:
                 nonce = self.w3.eth.getTransactionCount(self.my_account.address)
@@ -72,7 +94,6 @@ class CovertChannel:
             log.debug("TX NONCE: " + str(nonce))
 
 
-
             transaction = {
                 'to': self.dest_addr,
                 'value': 1,
@@ -83,13 +104,13 @@ class CovertChannel:
                 'data': '0x' + str(enc_data)
             }
 
-            print("Transaction: " + str(transaction))
+            log.debug("Transaction: " + str(transaction))
 
             signed_tx = self.w3.eth.account.sign_transaction(transaction, self.priv_key)
 
             log.debug("Transaction Signed")
-
             log.debug(signed_tx.s)
+
             try:
                 self.w3.eth.sendRawTransaction(signed_tx.rawTransaction)
             except ValueError as VE:
@@ -101,11 +122,20 @@ class CovertChannel:
                 break
 
             self.lastNonce = self.lastNonce + 1
+
+            self.shutdown_sem_lock.acquire()
+            ch_semaphore = self.shutdown_sem
+            self.shutdown_sem_lock.release()
         return True
 
 
 
-
+    ##
+    #   @brief Fetch messages from mempool
+    #
+    #   @return Encoded data as string
+    #   @return False if no message is found
+    #
     def recvData(self):
 
         data = self.node.inspect(self.dest_addr, self.recv_delay)
@@ -113,7 +143,7 @@ class CovertChannel:
         if data is not False:
             log.debug("Received: " + str(data))
             dec_data = binascii.unhexlify(data.replace('0x', ''))
-            print("DEC DATA: " + str(dec_data))
+            log.debug("DEC DATA: " + str(dec_data))
             return dec_data
         else:
             return False
@@ -121,9 +151,14 @@ class CovertChannel:
 
 
 
+    def close(self):
+        self.shutdown_sem_lock.acquire()
+        self.shutdown_sem = False
+        self.shutdown_sem_lock.release()
+
 
     def cancelTransaction(self):
-        while True:
+        while self.shutdown_sem:
 
             nonce = self.w3.eth.getTransactionCount(self.my_account.address)
             log.debug("TX NONCE: " + str(nonce))

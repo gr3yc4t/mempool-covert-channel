@@ -1,0 +1,10 @@
+
+config.txt
+
+__pycache__/
+
+test_dir/
+
+var/
+
+.vscode-ctags
