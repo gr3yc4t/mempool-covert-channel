@@ -1,8 +1,12 @@
 # Mempool Covert Channel
 #### Covert channel through blockchain with minimal costs
 
+## Warning
+This project is an **unfinished PoC** and it's probably not working anymore, feel free to use that for reference.
+
+
 ## Why?
-Have you ever thinked of a botnet relying on a blockchain? If the answer is yes, then many others already done that ([1] [2] [3]). 
+Have you ever thinked of a botnet relying on a blockchain? If the answer is yes, then many others already done that ([1]). 
 However I don't like their solution so much, mainly because where either a one-way communication channel or too costly for a real-world scenario.
 
 ## Optimize Costs
@@ -26,7 +30,3 @@ Best results would be obtained if both clients have access to RPC APIs of some G
 
 ### References
 [1] Ali, Syed & McCorry, Patrick & Lee, Peter & Hao, Feng. (2015). ZombieCoin: Powering Next-Generation Botnets with Bitcoin. 34-48. 10.1007/978-3-662-48051-9_3. 
-
-[2] Bla bla bla 2
-
-[3] Bla bla bla 3
